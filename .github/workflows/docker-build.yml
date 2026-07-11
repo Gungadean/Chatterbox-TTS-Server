@@ -56,6 +56,13 @@ jobs:
             build-args: ""
             runner: ubuntu-latest
 
+          # Intel XPUs
+          - dockerfile: Dockerfile.xpu
+            tag-suffx: xpu
+            platforms: linux/amd64
+            build-args: ""
+            runner: ubuntu-latest
+
           # CPU only
           - dockerfile: Dockerfile.cpu
             tag-suffix: cpu

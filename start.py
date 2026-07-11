@@ -8,7 +8,7 @@ management, hardware detection, dependency installation, and server startup.
 
 Features:
 - Cross-platform support (Windows, Linux, macOS)
-- Automatic GPU detection (NVIDIA, AMD)
+- Automatic GPU detection (NVIDIA, AMD, Intel)
 - Interactive hardware selection menu
 - Virtual environment management
 - Dependency installation with progress indication
@@ -26,6 +26,7 @@ Options:
     --nvidia            Install NVIDIA CUDA 12.1 version (skip menu)
     --nvidia-cu128      Install NVIDIA CUDA 12.8 version (skip menu)
     --rocm              Install AMD ROCm version (skip menu)
+    --intel             Install Intel version (skip menu)
     --portable          Use portable Python environment (Windows, skip prompt)
     --no-portable       Use standard virtual environment (Windows, skip prompt)
     --verbose, -v       Show detailed installation output
@@ -87,6 +88,7 @@ EMBEDDED_PYTHON_SHA256 = ""
 INSTALL_CPU = "cpu"
 INSTALL_NVIDIA = "nvidia"
 INSTALL_NVIDIA_CU128 = "nvidia-cu128"
+INSTALL_INTEL = "intel-xpu"
 INSTALL_ROCM = "rocm"
 
 # Requirements file mapping
@@ -94,6 +96,7 @@ REQUIREMENTS_MAP = {
     INSTALL_CPU: "requirements.txt",
     INSTALL_NVIDIA: "requirements-nvidia.txt",
     INSTALL_NVIDIA_CU128: "requirements-nvidia-cu128.txt",
+    INSTALL_INTEL: "requirements-intel.txt",
     INSTALL_ROCM: "requirements-rocm.txt",
 }
 
@@ -105,6 +108,7 @@ INSTALL_NAMES = {
     INSTALL_CPU: "CPU Only",
     INSTALL_NVIDIA: "NVIDIA GPU (CUDA 12.1)",
     INSTALL_NVIDIA_CU128: "NVIDIA GPU (CUDA 12.8 / Blackwell)",
+    INSTALL_INTEL: "INTEL GPU (XPU)",
     INSTALL_ROCM: "AMD GPU (ROCm 6.1)",
 }
 
@@ -518,7 +522,7 @@ def save_install_state(venv_dir, install_type):
 
     Args:
         venv_dir: Path to virtual environment directory
-        install_type: Type of installation (cpu, nvidia, nvidia-cu128, rocm)
+        install_type: Type of installation (cpu, nvidia, nvidia-cu128, xpu, rocm)
     """
     try:
         # Save install type
@@ -1270,6 +1274,44 @@ def detect_amd_gpu():
         return False, None
     except Exception:
         return False, None
+    
+    
+def detect_intel_gpu():
+    """
+    Detect Intel GPU using xpu-smi.
+
+    Returns:
+        Tuple of (found: bool, gpu_name: str or None)
+    """
+    try:
+        result = subprocess.run(
+            ["xpu-smi", "--query-gpu=name", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        if result.returncode == 0 and result.stdout.strip():
+            # Parse the output for "Device Name"
+            # Example output: "Device Name: Intel(R) Arc(TM) A770 Graphics"
+            for line in result.stdout.strip().split("\n"):
+                if "Device Name" in line:
+                    parts = line.split(":", 1)
+                    if len(parts) > 1:
+                        return True, parts[1].strip()
+
+            # If discovery succeeded but we didn't find "Device Name", report as found
+            return True, "Intel GPU (unknown model)"
+
+        return False, None
+
+    except FileNotFoundError:
+        # nvidia-smi not found
+        return False, None
+    except subprocess.TimeoutExpired:
+        return False, None
+    except Exception:
+        return False, None
 
 
 def detect_gpu():
@@ -1283,16 +1325,21 @@ def detect_gpu():
             "nvidia_name": str or None,
             "amd": bool,
             "amd_name": str or None,
+            "intel": bool,
+            "intel_name": str or None,
         }
     """
     nvidia_found, nvidia_name = detect_nvidia_gpu()
     amd_found, amd_name = detect_amd_gpu()
+    intel_found, intel_name = detect_intel_gpu()
 
     return {
         "nvidia": nvidia_found,
         "nvidia_name": nvidia_name,
         "amd": amd_found,
         "amd_name": amd_name,
+        "intel": intel_found,
+        "intel_name": intel_name,
     }
 
 
@@ -1315,6 +1362,8 @@ def get_default_choice(gpu_info):
         return INSTALL_NVIDIA
     elif gpu_info["amd"] and is_linux():
         return INSTALL_ROCM
+    elif gpu_info["intel"]:
+        return INSTALL_INTEL
     else:
         return INSTALL_CPU
 
@@ -1336,6 +1385,7 @@ def show_installation_menu(gpu_info, default_choice):
         "2": INSTALL_NVIDIA,
         "3": INSTALL_NVIDIA_CU128,
         "4": INSTALL_ROCM,
+        "5": INSTALL_INTEL,
     }
 
     # Reverse map for showing default
@@ -1359,6 +1409,11 @@ def show_installation_menu(gpu_info, default_choice):
     else:
         print(f"   AMD GPU:    {Colors.DIM}Not detected{Colors.RESET}")
 
+    if gpu_info["intel"]:
+        print_success(f"   Intel GPU: Detected ({gpu_info['intel_name']})")
+    else:
+        print(f"   Intel GPU: {Colors.DIM}Not detected{Colors.RESET}")
+
     # Print menu
     print()
     print("=" * 60)
@@ -1372,6 +1427,7 @@ def show_installation_menu(gpu_info, default_choice):
         ("2", "NVIDIA GPU (CUDA 12.1)", "Standard for RTX 20/30/40 series"),
         ("3", "NVIDIA GPU (CUDA 12.8)", "For RTX 5090 / Blackwell GPUs only"),
         ("4", "AMD GPU (ROCm 6.1)", "For AMD GPUs on Linux"),
+        ("5", "INTEL GPU (XPU)", "For Intel GPUs")
     ]
 
     for num, name, desc in options:
@@ -1815,8 +1871,11 @@ try:
         "version": torch.__version__,
         "cuda_available": torch.cuda.is_available(),
         "cuda_version": torch.version.cuda if torch.cuda.is_available() else None,
+        "xpu_available": torch.xpu.is_available(),
+        "xpu_version": torch.version.xpu if torch.cuda.is_available() else None,
         "gpu_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
-        "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() and torch.cuda.device_count() > 0 else None,
+        "gpu_name_nvidia": torch.cuda.get_device_name(0) if torch.cuda.is_available() and torch.cuda.device_count() > 0 else None,
+        "gpu_name_intel": torch.xpu.get_device_name(0) if torch.xpu.is_available() and torch.xpu.device_count() > else None,
     }
 except Exception as e:
     results["torch"] = {"ok": False, "error": str(e)}
@@ -1884,8 +1943,13 @@ print(json.dumps(results))
 
             if torch_result.get("cuda_available"):
                 cuda_ver = torch_result.get("cuda_version", "unknown")
-                gpu_name = torch_result.get("gpu_name", "unknown")
+                gpu_name = torch_result.get("gpu_name_nvidia", "unknown")
                 print_substep(f"PyTorch {version_str} with CUDA {cuda_ver}", "done")
+                print_substep(f"GPU: {gpu_name}", "done")
+            elif torch_result.get("xpu_available"):
+                xpu_ver = torch_result.get("xpu_version", "unknown")
+                gpu_name = torch_result.get("gpu_name_intel", "unknown")
+                print_substep(f"PyTorch {version_str} with XPU {xpu_ver}", "done")
                 print_substep(f"GPU: {gpu_name}", "done")
             else:
                 print_substep(f"PyTorch {version_str} (CPU mode)", "done")
@@ -2197,6 +2261,7 @@ Examples:
   python start.py --nvidia-cu128     # Install/start with NVIDIA CUDA 12.8
   python start.py --cpu              # Install/start with CPU only
   python start.py --rocm             # Install/start with AMD ROCm
+  python start.py --intel            # Install/start with Intel
   python start.py --portable         # Use portable mode (Windows)
   python start.py --no-portable      # Use standard venv (Windows)
   python start.py -v                 # Verbose mode (show all output)
@@ -2233,6 +2298,11 @@ Examples:
     )
     install_group.add_argument(
         "--rocm", action="store_true", help="Install AMD ROCm version (Linux only)"
+    )
+    install_group.add_argument(
+        "--intel",
+        action="store_true",
+        help="Install Intel",
     )
 
     # Environment mode (Windows)
@@ -2275,6 +2345,8 @@ def get_install_type_from_args(args):
         return INSTALL_NVIDIA_CU128
     elif args.rocm:
         return INSTALL_ROCM
+    elif args.intel:
+        return INSTALL_INTEL
 
     return None
 
@@ -2602,6 +2674,9 @@ def main():
             elif install_type == INSTALL_NVIDIA_CU128:
                 print(f"     pip install -r {requirements_file}")
                 print(f"     pip install --no-deps {CHATTERBOX_REPO}")
+            elif install_type == INSTALL_INTEL:
+                print(f"     pip install -r {requirements_file}")
+                print(f"     pip install --no-deps {CHATTERBOX_REPO}")
             else:
                 print(f"     pip install -r {requirements_file}")
             print()
@@ -2682,7 +2757,8 @@ def main():
         print("The server did not become ready within the timeout period.")
         print()
         print("Common causes:")
-        print("  - Missing CUDA drivers (for GPU installation)")
+        print("  - Missing CUDA drivers (for Nvidia GPU installation)")
+        print("  - Missing Intel drivers (for Intel GPU installation)")
         print("  - Insufficient memory (model requires ~8GB+ VRAM)")
         print("  - Network issues downloading the model")
         print("  - Port conflict")

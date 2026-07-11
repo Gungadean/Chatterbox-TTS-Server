@@ -54,8 +54,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "repo_id": "chatterbox-turbo",  # UPDATED: Default to Turbo model
     },
     "tts_engine": {
-        "device": "auto",  # TTS processing device: 'auto', 'cuda', 'mps', or 'cpu'.
-        # 'auto' will attempt to use 'cuda' if available, then 'mps' if available, otherwise 'cpu'.
+        "device": "auto",  # TTS processing device: 'auto', 'cuda', 'mps', 'xpu', or 'cpu'.
+        # 'auto' will attempt to use 'cuda' if available, then 'mps' if available, then 'xpu' if available, otherwise 'cpu'.
         "predefined_voices_path": str(
             DEFAULT_VOICES_PATH
         ),  # Directory for predefined voice files.
@@ -202,7 +202,7 @@ class YamlConfigManager:
         if current_device_setting == "auto":
             resolved_device = self._detect_best_device()
             _set_nested_value(config_data, ["tts_engine", "device"], resolved_device)
-        elif current_device_setting not in ["cuda", "mps", "cpu"]:
+        elif current_device_setting not in ["cuda", "mps", "xpu", "cpu"]:
             logger.warning(
                 f"Invalid TTS device '{current_device_setting}' in configuration. "
                 f"Defaulting to auto-detection."
@@ -232,10 +232,10 @@ class YamlConfigManager:
     def _detect_best_device(self) -> str:
         """
         Robustly detects the best available device for TTS processing.
-        Tests actual CUDA/MPS functionality rather than just checking availability.
+        Tests actual CUDA/MPS/XPU functionality rather than just checking availability.
 
         Returns:
-            str: 'cuda' if CUDA is truly functional, 'mps' if MPS is functional, 'cpu' otherwise.
+            str: 'cuda' if CUDA is truly functional, 'mps' if MPS is functional, 'xpu' if XPU is functional, 'cpu' otherwise.
         """
         # Test CUDA first as it's generally preferred for ML workloads
         if torch.cuda.is_available():
@@ -265,6 +265,21 @@ class YamlConfigManager:
                 logger.warning(
                     f"MPS is reported as available but failed functionality test: {e}. "
                     f"This usually means PyTorch was not compiled with MPS support."
+                )
+                
+        # Test XPU if CUDA or MPS is not available or failed
+        if torch.xpu.is_available():
+            try:
+                # Actually test XPU functionality by creating a tensor and moving it to XPU
+                test_tensor = torch.tensor([1.0])
+                test_tensor = test_tensor.xpu()
+                test_tensor = test_tensor.cpu()  # Clean up
+                logger.info("XPU test successful. Using XPU device.")
+                return "xpu"
+            except Exception as e:
+                logger.warning(
+                    f"XPU is reported as available but failed functionality test: {e}. "
+                    f"This usually means PyTorch was not compiled with XPU support."
                 )
 
         logger.info("Neither CUDA nor MPS is available or functional. Using CPU.")
@@ -778,7 +793,7 @@ def get_model_repo_id() -> str:
 
 # TTS Engine Settings Accessors
 def get_tts_device() -> str:
-    """Returns the resolved TTS processing device ('cuda' or 'cpu')."""
+    """Returns the resolved TTS processing device ('cuda', 'mps', 'xpu', or 'cpu')."""
     # Device is resolved during load_config, so direct get is appropriate.
     return config_manager.get_string(
         "tts_engine.device", _get_default_from_structure("tts_engine.device")

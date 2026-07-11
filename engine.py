@@ -95,6 +95,8 @@ def _resolve_bf16_setting() -> bool:
     if val == "auto":
         if torch.cuda.is_available():
             return torch.cuda.is_bf16_supported()
+        elif torch.xpu.is_available():
+            return torch.xpu.is_bf16_supported()
         return False
     # off / 0 / false / anything else
     return False
@@ -136,6 +138,9 @@ def set_seed(seed_value: int):
         torch.cuda.manual_seed_all(seed_value)  # if using multi-GPU
     if torch.backends.mps.is_available():
         torch.mps.manual_seed(seed_value)
+    if torch.xpu.is_available():
+        torch.xpu.manual_seed(seed_value)
+        torch.xpu.manual_seed_all(seed_value)  # if using multi-GPU
     random.seed(seed_value)
     np.random.seed(seed_value)
     logger.info(f"Global seed set to: {seed_value}")
@@ -178,6 +183,26 @@ def _test_mps_functionality() -> bool:
         return True
     except Exception as e:
         logger.warning(f"MPS functionality test failed: {e}")
+        return False
+    
+    
+def _test_xpu_functionality() -> bool:
+    """
+    Tests if XPU is actually functional, not just available.
+
+    Returns:
+        bool: True if XPU works, False otherwise.
+    """
+    if not torch.xpu.is_available():
+        return False
+
+    try:
+        test_tensor = torch.tensor([1.0])
+        test_tensor = test_tensor.to("xpu")
+        test_tensor = test_tensor.cpu()
+        return True
+    except Exception as e:
+        logger.warning(f"XPU functionality test failed: {e}")
         return False
 
 
@@ -294,6 +319,9 @@ def load_model() -> bool:
             elif _test_mps_functionality():
                 resolved_device_str = "mps"
                 logger.info("MPS functionality test passed. Using MPS.")
+            elif _test_xpu_functionality():
+                resolved_device_str = "xpu"
+                logger.info("XPU functionality test passed. Using XPU.")
             else:
                 resolved_device_str = "cpu"
                 logger.info("CUDA and MPS not functional or not available. Using CPU.")
@@ -321,6 +349,18 @@ def load_model() -> bool:
                     "PyTorch may not be compiled with MPS support. "
                     "Automatically falling back to CPU."
                 )
+                
+        elif device_setting == "xpu":
+            if _test_xpu_functionality():
+                resolved_device_str = "xpu"
+                logger.info("XPU requested and functional. Using XPU.")
+            else:
+                resolved_device_str = "cpu"
+                logger.warning(
+                    "XPU was requested in config but functionality test failed. "
+                    "PyTorch may not be compiled with XPU support. "
+                    "Automatically falling back to CPU."
+                )
 
         elif device_setting == "cpu":
             resolved_device_str = "cpu"
@@ -335,6 +375,8 @@ def load_model() -> bool:
                 resolved_device_str = "cuda"
             elif _test_mps_functionality():
                 resolved_device_str = "mps"
+            elif _test_xpu_functionality():
+                resolved_device_str = "xpu"
             else:
                 resolved_device_str = "cpu"
             logger.info(f"Auto-detection resolved to: {resolved_device_str}")
@@ -505,6 +547,25 @@ def synthesize(
                     exaggeration=exaggeration,
                     cfg_weight=cfg_weight,
                 )
+                
+        with torch.autocast("xpu", dtype=torch.bfloat16, enabled=BF16_ENABLED):
+            if loaded_model_type == "multilingual":
+                wav_tensor = chatterbox_model.generate(
+                    text=text,
+                    language_id=language,
+                    audio_prompt_path=effective_prompt,
+                    temperature=temperature,
+                    exaggeration=exaggeration,
+                    cfg_weight=cfg_weight,
+                )
+            else:
+                wav_tensor = chatterbox_model.generate(
+                    text=text,
+                    audio_prompt_path=effective_prompt,
+                    temperature=temperature,
+                    exaggeration=exaggeration,
+                    cfg_weight=cfg_weight,
+                )
 
         # Store conds in cache after first compute for this voice.
         if conds_key is not None and effective_prompt is not None:
@@ -562,6 +623,11 @@ def unload_model() -> bool:
             logger.debug(
                 "torch.mps.empty_cache() not available in this PyTorch version."
             )
+            
+    # Clear GPU Cache (XPU)
+    if torch.xpu.is_available():
+        logger.info("Clearing XPU cache...")
+        torch.xpu.empty_cache()
 
     logger.info("Model unloaded and GPU memory released.")
     return True
@@ -612,6 +678,11 @@ def reload_model() -> bool:
             logger.debug(
                 "torch.mps.empty_cache() not available in this PyTorch version."
             )
+            
+    # Clear GPU Cache (XPU)
+    if torch.xpu.is_available():
+        logger.info("Clearing XPU cache...")
+        torch.xpu.empty_cache()
 
     # 6. Reload model from the (now updated) configuration
     logger.info("Memory cleared. Reloading model from updated config...")
