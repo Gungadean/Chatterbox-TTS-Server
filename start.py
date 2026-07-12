@@ -1875,7 +1875,7 @@ try:
         "xpu_version": torch.version.xpu if torch.cuda.is_available() else None,
         "gpu_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
         "gpu_name_nvidia": torch.cuda.get_device_name(0) if torch.cuda.is_available() and torch.cuda.device_count() > 0 else None,
-        "gpu_name_intel": torch.xpu.get_device_name(0) if torch.xpu.is_available() and torch.xpu.device_count() > else None,
+        "gpu_name_intel": torch.xpu.get_device_name(0) if torch.xpu.is_available() and torch.xpu.device_count() > 0 else None,
     }
 except Exception as e:
     results["torch"] = {"ok": False, "error": str(e)}
