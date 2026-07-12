@@ -112,8 +112,8 @@ INSTALL_NAMES = {
     INSTALL_ROCM: "AMD GPU (ROCm 6.1)",
 }
 
-# Chatterbox fork URL (used for CUDA 12.8 installation)
-CHATTERBOX_REPO = "git+https://github.com/devnen/chatterbox-v2.git@master"
+# Chatterbox fork URL (Updated to support Intel XPUs)
+CHATTERBOX_REPO = "git+https://github.com/Gungadean/chatterbox.git@master"
 
 # Timeout settings (seconds)
 # First run downloads large model files (~2GB). Subsequent starts are much faster.
