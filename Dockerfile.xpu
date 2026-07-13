@@ -39,7 +39,7 @@ WORKDIR /app
 COPY requirements-intel.txt ./requirements-intel.txt
 
 # Install dependencies:
-# 1. Requirements file installs torch 2.9.0+cu128 (with sm_120 Blackwell support)
+# 1. Requirements file installs torch 2.11.0+xpu (with Intel XPU support)
 #    plus all other server dependencies
 # 2. Chatterbox with --no-deps to prevent pip from downgrading torch
 RUN python3 -m pip install --no-cache-dir --upgrade pip && \
