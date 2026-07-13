@@ -349,7 +349,7 @@ def load_model() -> bool:
                     "PyTorch may not be compiled with MPS support. "
                     "Automatically falling back to CPU."
                 )
-                
+
         elif device_setting == "xpu":
             if _test_xpu_functionality():
                 resolved_device_str = "xpu"
@@ -529,26 +529,7 @@ def synthesize(
         # Call the core model's generate method.
         # autocast promotes float32 inputs to bfloat16 to match T3/S3Gen weights,
         # keeping numerically sensitive ops (softmax, norms) in float32 automatically.
-        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=BF16_ENABLED):
-            if loaded_model_type == "multilingual":
-                wav_tensor = chatterbox_model.generate(
-                    text=text,
-                    language_id=language,
-                    audio_prompt_path=effective_prompt,
-                    temperature=temperature,
-                    exaggeration=exaggeration,
-                    cfg_weight=cfg_weight,
-                )
-            else:
-                wav_tensor = chatterbox_model.generate(
-                    text=text,
-                    audio_prompt_path=effective_prompt,
-                    temperature=temperature,
-                    exaggeration=exaggeration,
-                    cfg_weight=cfg_weight,
-                )
-                
-        with torch.autocast("xpu", dtype=torch.bfloat16, enabled=BF16_ENABLED):
+        with torch.autocast(device_type=model_device, dtype=torch.bfloat16, enabled=BF16_ENABLED):
             if loaded_model_type == "multilingual":
                 wav_tensor = chatterbox_model.generate(
                     text=text,
