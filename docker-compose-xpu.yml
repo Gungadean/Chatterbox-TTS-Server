@@ -2,11 +2,14 @@ services:
   chatterbox-tts-server:
     build:
       context: .
-      dockerfile: Dockerfile.cu128
-      args:
-        RUNTIME: nvidia
-    image: chatterbox-tts-server:cu128
-    container_name: chatterbox-tts-server-cu128
+      dockerfile: Dockerfile.xpu
+    image: chatterbox-tts-server:xpu
+    container_name: chatterbox-tts-server-xpu
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+      - render
     ports:
       - "8004:8004"
     volumes:
@@ -19,13 +22,6 @@ services:
       - ~/.cache/huggingface:/app/hf_cache
     environment:
       - HF_TOKEN=YOUR_TOKEN_HERE
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      - SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=1
+      - ZES_ENABLE_SYSMAN=1
     restart: unless-stopped
